@@ -109,3 +109,56 @@ macro close fd
     syscall1 SYS_close, fd
 }
 
+macro socket domain, type, protocol
+{
+    mov rax, SYS_socket
+    mov rdi, domain
+    mov rsi, type
+    mov rdx, protocol
+    syscall
+}
+
+macro bind sockfd, addr, addrlen
+{
+    syscall3 SYS_bind sockfd, addr, addrlen
+}
+
+macro listen sockfd, backlog
+{
+    syscall2 SYS_listen, sockfd, backlog
+}
+
+macro accept sockfd, addr, addrlen
+{
+    syscall3, SYS_accept, sockfd, addr, addrlen
+}
+
+macro exit code
+{
+    mov rax, SYS_exit
+    mov rdi, code
+    syscall
+}
+
+macro open filename, flags, mode
+{
+    syscall3, SYS_open, filename, flags, mode
+}
+
+struc serveraddr_in
+{
+    .sin_family dw 0
+    .sin_port dw 0
+    .sin_addr dd 0
+    .sin_zero dq 0
+}
+
+macro setsockopt sockfd, level, optname, optval, optlen
+{
+    syscall5 SYS_setsockopt, sockfd, level, optname, optval, optlen
+}
+
+macro fstat64 fd, statbuf
+{
+    syscall2 SYS_fstat64, fd, statbuf
+}
