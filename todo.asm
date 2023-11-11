@@ -16,6 +16,8 @@ main:
     call load_todos
 
     funcall2 write_cstr, STDOUT, start
+
+    funcall2 write_cstr, STDOUT, socket_trace_msg
     socket AF_INET, SOCK_STREAM, 0
     cmp rax, 0
     jl .fatal_error
@@ -33,6 +35,7 @@ main:
     mov word [servaddr.sin_family], AF_INET
     mov word [servaddr.sin_port], 14619
     mov dword [servaddr.sin_addr], INADDR_ANY
+    bind [sockfd], servaddr.sin_family, sizeof_servaddr
     cmp rax, 0
     jl .fatal_error
 
@@ -42,8 +45,8 @@ main:
     jl .fatal_error
 
 .next_request:
-    funcall2 write_cstr STDOUT, accept_trace_msg
-    accept [sockfd], cliaddr.sin_family 
+    funcall2 write_cstr, STDOUT, accept_trace_msg
+    accept [sockfd], cliaddr.sin_family, cliaddr_len
     cmp rax, 0
     jl .fatal_error
 
@@ -91,7 +94,7 @@ main:
     cmp rax, 0
     jg .process_shutdown
 
-    jg .serve_error_404
+    jmp .serve_error_404
 
 .process_shutdown:
     funcall2 write_cstr, [connfd], shutdown_response
@@ -112,7 +115,7 @@ main:
 
     jmp .serve_error_400
 
-serve_index_page:
+.serve_index_page:
     funcall2 write_cstr, [connfd], index_page_response
     funcall2 write_cstr, [connfd], index_page_header
     call render_todos_as_html
@@ -160,12 +163,12 @@ serve_index_page:
     exit 0
 
 .fatal_error:
-    funcall2 write_cstr, STDERR, ok_msg
+    funcall2 write_cstr, STDERR, error_msg
     close [connfd]
     close [sockfd]
-    exit 0
+    exit 1
 
-.drop_http_header:
+drop_http_header:
 .next_line:
     funcall4 starts_with, [request_cur], [request_len], clrs, 2
     cmp rax, 0
@@ -193,64 +196,262 @@ serve_index_page:
     xor rax, rax
     ret
 
-.delete_todo:
-    mov rax, TODO_SIZE
-    mul rdi
-    cmp rax, [todo_end_offset]
-    jge .overflow
+;; rdi - size_t index
+delete_todo:
+   mov rax, TODO_SIZE
+   mul rdi
+   cmp rax, [todo_end_offset]
+   jge .overflow
 
-    mov rdi, todo_begin
-    add rdi, rax
-    mov rsi, todo_begin
-    add rsi, rax
-    mov rdx, TODO_SIZE
-    add rdx, [todo_end_offset]
-    sub rdx, rsi
-    call memcpy
+   ;; ****** ****** ******
+   ;; ^      ^             ^
+   ;; dst    src           end
+   ;;
+   ;; count = end - src
 
-    sub [todo_end_offset], TODO_SIZE
+   mov rdi, todo_begin
+   add rdi, rax
+   mov rsi, todo_begin
+   add rsi, rax
+   add rsi, TODO_SIZE
+   mov rdx, todo_begin
+   add rdx, [todo_end_offset]
+   sub rdx, rsi
+   call memcpy
 
+   sub [todo_end_offset], TODO_SIZE
 .overflow:
-    ret
+   ret
 
 load_todos:
-    sub rsp, 16
-    mov qword [rsp+8], -1
-    mov qword [rsp], 0
+   ;; [rsp+8] - fd
+   ;; [rsp]   - st_size
 
-    open todo_db_file_path, O_RDONLY, 0
-    cmp rax, 0
-    jl .error
-    mov [rsp+8], statbuf
-    
-    fstat64 [rsp+8], statbuf
-    cmp rax, 0
-    jl .error
+   sub rsp, 16
+   mov qword [rsp+8], -1
+   mov qword [rsp], 0
 
-    mov rax, statbuf
-    add rax, stat64.st_size
-    mov rax, [rax]
-    mov [rsp], rax
+   open todo_db_file_path, O_RDONLY, 0
+   cmp rax, 0
+   jl .error
+   mov [rsp+8], rax
 
-    mov rcx, TODO_SIZE
-    div rcx
-    cmp rdx, 0
-    jne .error
+   fstat64 [rsp+8], statbuf
+   cmp rax, 0
+   jl .error
 
-    mov rcx, TODO_CAP*TODO_SIZE
-    mov rax, [rsp]
-    cmp rax, rcx
-    cmovg rax, rcx
-    mov [rsp], rax
+   mov rax, statbuf
+   add rax, stat64.st_size
+   mov rax, [rax]
+   mov [rsp], rax
 
-    read [rsp+8], todo_begin, [rsp]
-    mov rax, [rsp]
-    mov [todo_end_offset], rax
+   ;; Check if the size of db is divisible by TODO_SIZE
+   mov rcx, TODO_SIZE
+   div rcx
+   cmp rdx, 0
+   jne .error
+
+   ;; Truncate the size to supported TODO_CAP
+   mov rcx, TODO_CAP*TODO_SIZE
+   mov rax, [rsp]
+   cmp rax, rcx
+   cmovg rax, rcx
+   mov [rsp], rax
+
+   ;; Read the entire db from file system
+   read [rsp+8], todo_begin, [rsp]
+   mov rax, [rsp]
+   mov [todo_end_offset], rax
 
 .error:
-    close [rsp+8]
-    add rsp, 16
-    ret
+   close [rsp+8]
+   add rsp, 16
+   ret
 
 save_todos:
-    
+   open todo_db_file_path, O_CREAT or O_WRONLY or O_TRUNC, 420
+   cmp rax, 0
+   jl .fail
+   push rax
+   write qword [rsp], todo_begin, [todo_end_offset]
+   close qword [rsp]
+   pop rax
+.fail:
+   ret
+
+;; TODO: sanitize the input to prevent XSS
+;; rdi - void *buf
+;; rsi - size_t count
+add_todo:
+   ;; Check for TODO capacity overflow
+   cmp qword [todo_end_offset], TODO_SIZE*TODO_CAP
+   jge .capacity_overflow
+
+   ;; Truncate strings longer than 255
+   mov rax, 0xFF
+   cmp rsi, rax
+   cmovg rsi, rax
+
+   push rdi ;; void *buf [rsp+8]
+   push rsi ;; size_t count [rsp]
+
+   ;; +*******
+   ;;  ^
+   ;;  rdi
+   mov rdi, todo_begin
+   add rdi, [todo_end_offset]
+   mov rdx, [rsp]
+   mov byte [rdi], dl
+   inc rdi
+   mov rsi, [rsp+8]
+   call memcpy
+
+   add [todo_end_offset], TODO_SIZE
+
+   pop rsi
+   pop rdi
+   mov rax, 0
+   ret
+.capacity_overflow:
+   mov rax, 1
+   ret
+
+render_todos_as_html:
+    push 0
+    push todo_begin
+.next_todo:
+    mov rax, [rsp]
+    mov rbx, todo_begin
+    add rbx, [todo_end_offset]
+    cmp rax, rbx
+    jge .done
+
+    funcall2 write_cstr, [connfd], todo_header
+    funcall2 write_cstr, [connfd], delete_button_prefix
+    funcall2 write_uint, [connfd], [rsp+8]
+    funcall2 write_cstr, [connfd], delete_button_suffix
+
+    mov rax, SYS_write
+    mov rdi, [connfd]
+    mov rsi, [rsp]
+    xor rdx, rdx
+    mov dl, byte [rsi]
+    inc rsi
+    syscall
+
+    funcall2 write_cstr, [connfd], todo_footer
+    mov rax, [rsp]
+    add rax, TODO_SIZE
+    mov [rsp], rax
+    inc qword [rsp+8]
+    jmp .next_todo
+.done:
+    pop rax
+    pop rax
+    ret
+
+segment readable writeable
+
+enable dd 1
+sockfd dq -1
+connfd dq -1
+servaddr servaddr_in
+sizeof_servaddr = $ - servaddr.sin_family
+cliaddr servaddr_in
+cliaddr_len dd sizeof_servaddr
+
+clrs db 13, 10
+
+error_400            db "HTTP/1.1 400 Bad Request", 13, 10
+                     db "Content-Type: text/html; charset=utf-8", 13, 10
+                     db "Connection: close", 13, 10
+                     db 13, 10
+                     db "<h1>Bad Request</h1>", 10
+                     db "<a href='/'>Back to Home</a>", 10
+                     db 0
+error_404            db "HTTP/1.1 404 Not found", 13, 10
+                     db "Content-Type: text/html; charset=utf-8", 13, 10
+                     db "Connection: close", 13, 10
+                     db 13, 10
+                     db "<h1>Page not found</h1>", 10
+                     db "<a href='/'>Back to Home</a>", 10
+                     db 0
+error_405            db "HTTP/1.1 405 Method Not Allowed", 13, 10
+                     db "Content-Type: text/html; charset=utf-8", 13, 10
+                     db "Connection: close", 13, 10
+                     db 13, 10
+                     db "<h1>Method not Allowed</h1>", 10
+                     db "<a href='/'>Back to Home</a>", 10
+                     db 0
+index_page_response  db "HTTP/1.1 200 OK", 13, 10
+                     db "Content-Type: text/html; charset=utf-8", 13, 10
+                     db "Connection: close", 13, 10
+                     db 13, 10
+                     db 0
+index_page_header    db "<h1>To-Do</h1>", 10
+                     db "<ul>", 10
+                     db 0
+index_page_footer    db "  <li>", 10
+                     db "    <form style='display: inline' method='post' action='/' enctype='text/plain'>", 10
+                     db "        <input style='width: 25px' type='submit' value='+'>", 10
+                     db "        <input type='text' name='todo' autofocus>", 10
+                     db "    </form>", 10
+                     db "  </li>", 10
+                     db "</ul>", 10
+                     db "<form method='post' action='/shutdown'>", 10
+                     db "    <input type='submit' value='shutdown'>", 10
+                     db "</form>", 10
+                     db 0
+todo_header          db "  <li>"
+                     db 0
+todo_footer          db "</li>", 10
+                     db 0
+delete_button_prefix db "<form style='display: inline' method='post' action='/'>"
+                     db "<button style='width: 25px' type='submit' name='delete' value='"
+                     db 0
+delete_button_suffix db "'>x</button></form> "
+                     db 0
+shutdown_response    db "HTTP/1.1 200 OK", 13, 10
+                     db "Content-Type: text/html; charset=utf-8", 13, 10
+                     db "Connection: close", 13, 10
+                     db 13, 10
+                     db "<h1>Shutting down the server...</h1>", 10
+                     db "Please close this tab"
+                     db 0
+
+todo_form_data_prefix db "todo="
+todo_form_data_prefix_len = $ - todo_form_data_prefix
+delete_form_data_prefix db "delete="
+delete_form_data_prefix_len = $ - delete_form_data_prefix
+
+get db "GET "
+get_len = $ - get
+post db "POST "
+post_len = $ - post
+
+index_route db "/ "
+index_route_len = $ - index_route
+
+shutdown_route db "/shutdown "
+shutdown_route_len = $ - shutdown_route
+
+start            db "INFO: Starting Web Server!", 10, 0
+ok_msg           db "INFO: OK!", 10, 0
+socket_trace_msg db "INFO: Creating a socket...", 10, 0
+bind_trace_msg   db "INFO: Binding the socket...", 10, 0
+listen_trace_msg db "INFO: Listening to the socket...", 10, 0
+accept_trace_msg db "INFO: Waiting for client connections...", 10, 0
+error_msg        db "FATAL ERROR!", 10, 0
+
+todo_db_file_path db "todo.db", 0
+
+request_len rq 1
+request_cur rq 1
+request     rb REQUEST_CAP
+
+;; [todo][todo][todo][todo][todo][todo]...
+;;             ^
+todo_begin rb TODO_SIZE*TODO_CAP
+todo_end_offset rq 1
+
+statbuf rb sizeof_stat64
