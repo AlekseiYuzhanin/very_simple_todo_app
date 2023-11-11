@@ -196,18 +196,11 @@ drop_http_header:
     xor rax, rax
     ret
 
-;; rdi - size_t index
 delete_todo:
    mov rax, TODO_SIZE
    mul rdi
    cmp rax, [todo_end_offset]
    jge .overflow
-
-   ;; ****** ****** ******
-   ;; ^      ^             ^
-   ;; dst    src           end
-   ;;
-   ;; count = end - src
 
    mov rdi, todo_begin
    add rdi, rax
@@ -245,20 +238,17 @@ load_todos:
    mov rax, [rax]
    mov [rsp], rax
 
-   ;; Check if the size of db is divisible by TODO_SIZE
    mov rcx, TODO_SIZE
    div rcx
    cmp rdx, 0
    jne .error
 
-   ;; Truncate the size to supported TODO_CAP
    mov rcx, TODO_CAP*TODO_SIZE
    mov rax, [rsp]
    cmp rax, rcx
    cmovg rax, rcx
    mov [rsp], rax
 
-   ;; Read the entire db from file system
    read [rsp+8], todo_begin, [rsp]
    mov rax, [rsp]
    mov [todo_end_offset], rax
@@ -279,25 +269,17 @@ save_todos:
 .fail:
    ret
 
-;; TODO: sanitize the input to prevent XSS
-;; rdi - void *buf
-;; rsi - size_t count
 add_todo:
-   ;; Check for TODO capacity overflow
    cmp qword [todo_end_offset], TODO_SIZE*TODO_CAP
    jge .capacity_overflow
 
-   ;; Truncate strings longer than 255
    mov rax, 0xFF
    cmp rsi, rax
    cmovg rsi, rax
 
-   push rdi ;; void *buf [rsp+8]
-   push rsi ;; size_t count [rsp]
+   push rdi 
+   push rsi 
 
-   ;; +*******
-   ;;  ^
-   ;;  rdi
    mov rdi, todo_begin
    add rdi, [todo_end_offset]
    mov rdx, [rsp]
@@ -449,8 +431,7 @@ request_len rq 1
 request_cur rq 1
 request     rb REQUEST_CAP
 
-;; [todo][todo][todo][todo][todo][todo]...
-;;             ^
+            
 todo_begin rb TODO_SIZE*TODO_CAP
 todo_end_offset rq 1
 

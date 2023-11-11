@@ -1,5 +1,3 @@
-;; Linux related constants and macros
-
 SYS_read equ 0
 SYS_open equ 2
 SYS_write equ 1
@@ -33,39 +31,6 @@ STDERR equ 2
 
 EXIT_SUCCESS equ 0
 EXIT_FAILURE equ 1
-
-; struct stat64 {
-; 	unsigned long long	st_dev;
-; 	unsigned char	__pad0[4];
-
-; 	unsigned long	__st_ino;
-
-; 	unsigned int	st_mode;
-; 	unsigned int	st_nlink;
-
-; 	unsigned long	st_uid;
-; 	unsigned long	st_gid;
-
-; 	unsigned long long	st_rdev;
-; 	unsigned char	__pad3[4];
-
-; 	long long	st_size;
-; 	unsigned long	st_blksize;
-
-; 	/* Number 512-byte blocks allocated. */
-; 	unsigned long long	st_blocks;
-
-; 	unsigned long	st_atime;
-; 	unsigned long	st_atime_nsec;
-
-; 	unsigned long	st_mtime;
-; 	unsigned int	st_mtime_nsec;
-
-; 	unsigned long	st_ctime;
-; 	unsigned long	st_ctime_nsec;
-
-; 	unsigned long long	st_ino;
-; };
 
 sizeof_stat64 = 144
 stat64.st_size = 48
@@ -144,7 +109,6 @@ macro close fd
     syscall1 SYS_close, fd
 }
 
-;; int socket(int domain, int type, int protocol);
 macro socket domain, type, protocol
 {
     mov rax, SYS_socket
@@ -154,19 +118,16 @@ macro socket domain, type, protocol
     syscall
 }
 
-;; int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 macro bind sockfd, addr, addrlen
 {
     syscall3 SYS_bind, sockfd, addr, addrlen
 }
 
-;;       int listen(int sockfd, int backlog);
 macro listen sockfd, backlog
 {
     syscall2 SYS_listen, sockfd, backlog
 }
 
-;; int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
 macro accept sockfd, addr, addrlen
 {
     syscall3 SYS_accept, sockfd, addr, addrlen
@@ -192,7 +153,6 @@ struc servaddr_in
     .sin_zero   dq 0
 }
 
-; int setsockopt(int sockfd, int level, int optname, const void *optval, socklen_t optlen);
 macro setsockopt sockfd, level, optname, optval, optlen
 {
     syscall5 SYS_setsockopt, sockfd, level, optname, optval, optlen

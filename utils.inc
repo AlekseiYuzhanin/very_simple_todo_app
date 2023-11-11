@@ -1,15 +1,10 @@
-;; Generally useful utility functions
-
-;; Write an integer to a file
-;;   rdi - int fd
-;;   rsi - uint64_t int x
 write_uint:
     test rsi, rsi
     jz .base_zero
 
-    mov rcx, 10     ;; 10 literal for division
-    mov rax, rsi    ;; keeping track of rsi in rax cause it's easier to div it like that
-    mov r10, 0      ;; counter of how many digits we already converted
+    mov rcx, 10    
+    mov rax, rsi    
+    mov r10, 0      
 .next_digit:
     test rax, rax
     jz .done
@@ -31,9 +26,6 @@ write_uint:
     inc rsp
     ret
 
-;; Write a NULL-terminated string to a file
-;;   rdi - int fd
-;;   rsi - const char *s
 write_cstr:
     push rsi
     push rdi
@@ -47,8 +39,6 @@ write_cstr:
     syscall
     ret
 
-;; Compute the length of a NULL-terminated string
-;;   rdi - const char *s
 strlen:
     push rdi
     xor rax, rax
@@ -65,9 +55,6 @@ strlen:
     mov rax, rdi
     ret
 
-;; Parse unsigned integer from a sized string
-;;   rdi - void *buf
-;;   rsi - size_t n
 parse_uint:
     xor rax, rax
     xor rbx, rbx
@@ -92,10 +79,6 @@ parse_uint:
 .done:
     ret
 
-;; Copy a chunk of memory
-;;   rdi - void *dst
-;;   rsi - void *src
-;;   rdx - size_t n
 memcpy:
 .next_byte:
    cmp rdx, 0
@@ -112,11 +95,6 @@ memcpy:
 .done:
    ret
 
-
-;; Find a character with a sized string
-;;   rdi - void *buf
-;;   rsi - size_t n
-;;   rdx - char c
 find_char:
    cmp rsi, 0
    jle .not_found
@@ -136,11 +114,6 @@ find_char:
    mov rax, rdi
    ret
 
-;; Check if text starts with the prefix (both strings are sized)
-;;   rdi - void *text
-;;   rsi - size_t text_len
-;;   rdx - void *prefix
-;;   r10 - size_t prefix_len
 starts_with:
     xor rax, rax
     xor rbx, rbx
