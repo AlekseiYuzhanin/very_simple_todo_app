@@ -126,4 +126,131 @@ serve_index_page:
     jmp .next_request
 
 .serve_error_404:
+    funcall2 write_cstr, [connfd], error_404
+    close [connfd]
+    jmp .next_request
+
+.serve_error_405:
+    funcall2 write_cstr, [connfd], error_405
+    close [connfd]
+    jmp .next_request
+
+.add_new_todo_and_serve_index_page:
+    add [request_cur], todo_form_data_prefix_len
+    sub [request_len], todo_form_data_prefix_len
+
+    funcall2 add_todo, [request_cur], [request_len]
+    call save_todos
+    jmp .serve_index_page
+
+.delete_todo_and_serve_index_page:
+    add [request_cur], delete_form_data_prefix_len
+    sub [request_len], delete_form_data_prefix_len
+
+    funcall2 parse_uint, [request_cur], [request_len]
+    mov rdi, rax
+    call delete_todo
+    call save_todos
+    jmp .serve_index_page
+
+.shutdown:
+    funcall2 write_cstr, STDOUT, ok_msg
+    close [connfd]
+    close [sockfd]
+    exit 0
+
+.fatal_error:
+    funcall2 write_cstr, STDERR, ok_msg
+    close [connfd]
+    close [sockfd]
+    exit 0
+
+.drop_http_header:
+.next_line:
+    funcall4 starts_with, [request_cur], [request_len], clrs, 2
+    cmp rax, 0
+    jg .reached_end
+
+    funcall3 find_char, [request_cur], [request_len], 10
+    cmp rax, 0
+    je .invalid_header
+
+    mov rsi, rax
+    sub rsi, [request_cur]
+    inc rsi
+    add [request_cur], rsi
+    sub [request_len], rsi
+
+    jmp .next_line
+
+.reached_end:
+    add [request_cur], 2
+    sub [request_len], 2
+    mov rax, 1
+    ret
+
+.invalid_header:
+    xor rax, rax
+    ret
+
+.delete_todo:
+    mov rax, TODO_SIZE
+    mul rdi
+    cmp rax, [todo_end_offset]
+    jge .overflow
+
+    mov rdi, todo_begin
+    add rdi, rax
+    mov rsi, todo_begin
+    add rsi, rax
+    mov rdx, TODO_SIZE
+    add rdx, [todo_end_offset]
+    sub rdx, rsi
+    call memcpy
+
+    sub [todo_end_offset], TODO_SIZE
+
+.overflow:
+    ret
+
+load_todos:
+    sub rsp, 16
+    mov qword [rsp+8], -1
+    mov qword [rsp], 0
+
+    open todo_db_file_path, O_RDONLY, 0
+    cmp rax, 0
+    jl .error
+    mov [rsp+8], statbuf
+    
+    fstat64 [rsp+8], statbuf
+    cmp rax, 0
+    jl .error
+
+    mov rax, statbuf
+    add rax, stat64.st_size
+    mov rax, [rax]
+    mov [rsp], rax
+
+    mov rcx, TODO_SIZE
+    div rcx
+    cmp rdx, 0
+    jne .error
+
+    mov rcx, TODO_CAP*TODO_SIZE
+    mov rax, [rsp]
+    cmp rax, rcx
+    cmovg rax, rcx
+    mov [rsp], rax
+
+    read [rsp+8], todo_begin, [rsp]
+    mov rax, [rsp]
+    mov [todo_end_offset], rax
+
+.error:
+    close [rsp+8]
+    add rsp, 16
+    ret
+
+save_todos:
     
