@@ -43,7 +43,7 @@ main:
 
 .next_request:
     funcall2 write_cstr STDOUT, accept_trace_msg
-    accept [sockfd], cliaddr.sin_family cliaddr_len
+    accept [sockfd], cliaddr.sin_family 
     cmp rax, 0
     jl .fatal_error
 
@@ -66,7 +66,7 @@ main:
     cmp rax, 0
     jg .handle_post_method
 
-    jmp .server_error_405
+    jmp .serve_error_405
 
 .handle_get_method:
     add [request_cur], get_len
@@ -77,7 +77,7 @@ main:
     cmp rax, 0
     jg .serve_index_page
 
-    jmp .server_error_404
+    jmp .serve_error_404
 
 .handle_post_method:
     add [request_cur], post_len
@@ -91,7 +91,7 @@ main:
     cmp rax, 0
     jg .process_shutdown
 
-    jg .server_error_404
+    jg .serve_error_404
 
 .process_shutdown:
     funcall2 write_cstr, [connfd], shutdown_response
@@ -100,7 +100,7 @@ main:
 .process_add_or_delete_todo_post:
     call drop_http_header
     cmp rax, 0
-    je .server_error_400
+    je .serve_error_400
 
     funcall4 starts_with, [request_cur], [request_len], todo_form_data_prefix, todo_form_data_prefix_len
     cmp rax, 0
@@ -110,5 +110,20 @@ main:
     cmp rax, 0
     jg .delete_todo_and_serve_index_page
 
-    jmp .server_error_400
+    jmp .serve_error_400
 
+serve_index_page:
+    funcall2 write_cstr, [connfd], index_page_response
+    funcall2 write_cstr, [connfd], index_page_header
+    call render_todos_as_html
+    funcall2 write_cstr, [connfd], index_page_footer
+    close [connfd]
+    jmp .next_request
+
+.serve_error_400:
+    funcall2 write_cstr, [connfd], error_400
+    close [connfd]
+    jmp .next_request
+
+.serve_error_404:
+    

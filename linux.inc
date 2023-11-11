@@ -145,7 +145,7 @@ macro open filename, flags, mode
     syscall3, SYS_open, filename, flags, mode
 }
 
-struc serveraddr_in
+struc servaddr_in
 {
     .sin_family dw 0
     .sin_port dw 0
