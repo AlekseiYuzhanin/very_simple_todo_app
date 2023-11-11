@@ -42,4 +42,73 @@ main:
     jl .fatal_error
 
 .next_request:
-    
+    funcall2 write_cstr STDOUT, accept_trace_msg
+    accept [sockfd], cliaddr.sin_family cliaddr_len
+    cmp rax, 0
+    jl .fatal_error
+
+    mov qword [connfd], rax
+
+    read [connfd], request, REQUEST_CAP
+    cmp rax, 0
+    jl .fatal_error
+    mov [request_len], rax
+
+    mov [request_cur], request
+
+    write STDOUT, [request_cur], [request_len]
+
+    funcall4 starts_with, [request_cur], [request_len], get, get_len
+    cmp rax, 0
+    jg .handle_get_method
+
+    funcall4 starts_with, [request_cur], [request_len], post, post_len
+    cmp rax, 0
+    jg .handle_post_method
+
+    jmp .server_error_405
+
+.handle_get_method:
+    add [request_cur], get_len
+    sub [request_len], get_len
+
+    funcall4 starts_with, [request_cur], [request_len], index_route, index_route_len
+    call starts_with
+    cmp rax, 0
+    jg .serve_index_page
+
+    jmp .server_error_404
+
+.handle_post_method:
+    add [request_cur], post_len
+    sub [request_len], post_len
+
+    funcall4 starts_with, [request_cur], [request_len], index_route, index_route_len
+    cmp rax, 0
+    jg .process_add_or_delete_todo_post
+
+    funcall4 starts_with, [request_cur], [request_len], shutdown_route, shutdown_route_len
+    cmp rax, 0
+    jg .process_shutdown
+
+    jg .server_error_404
+
+.process_shutdown:
+    funcall2 write_cstr, [connfd], shutdown_response
+    jmp .shutdown
+
+.process_add_or_delete_todo_post:
+    call drop_http_header
+    cmp rax, 0
+    je .server_error_400
+
+    funcall4 starts_with, [request_cur], [request_len], todo_form_data_prefix, todo_form_data_prefix_len
+    cmp rax, 0
+    jg .add_new_todo_and_serve_index_page
+
+    funcall4 starts_with, [request_cur], [request_len], delete_form_data_prefix, delete_form_data_prefix_len
+    cmp rax, 0
+    jg .delete_todo_and_serve_index_page
+
+    jmp .server_error_400
+
