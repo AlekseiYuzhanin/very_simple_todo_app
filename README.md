@@ -1,5 +1,7 @@
 # very_simple_todo_app
 ```
-console
+fasm ./todo.asm
+chmod +x ./todo.asm
+./todo
 
 ```
