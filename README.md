@@ -5,3 +5,4 @@ chmod +x ./todo.asm
 ./todo
 
 ```
+Server will be listening on port 6969
